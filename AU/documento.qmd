@@ -1,0 +1,269 @@
+---
+title: "AU · Documento con herramienta alternativa a Jupyter Notebook"
+subtitle: "Extracción de Conocimiento en Bases de Datos — 2a. Evaluación"
+author: "Irving Chaparro Peña"
+date: today
+lang: es
+format:
+  html:
+    toc: true
+    toc-depth: 2
+    number-sections: true
+    embed-resources: true
+    theme: cosmo
+    code-fold: true
+    code-summary: "Mostrar código"
+jupyter: quarto-venv
+execute:
+  warning: false
+---
+
+## Sobre este documento
+
+Este documento **no fue elaborado en Jupyter Notebook**, sino con **[Quarto](https://quarto.org)**, un sistema de publicación científica que combina texto narrativo (Markdown) con código ejecutable (Python), y se renderiza a un documento final autocontenido (HTML). El código de cada sección se ejecuta realmente al generar el documento — los resultados, métricas y gráficas que se muestran a continuación no son capturas de un notebook, sino la salida directa de la ejecución de este archivo `.qmd`.
+
+Se retoman los dos análisis desarrollados en la sección **DE** de esta evaluación — clasificación sobre `breast-cancer.csv` y regresión sobre `beisbol.csv` — pero documentados aquí con esta herramienta alternativa, con el mismo rigor de justificación, diseño, evaluación/optimización y gráficas interpretadas.
+
+```{python}
+#| echo: false
+import warnings
+warnings.filterwarnings("ignore")
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+sns.set_theme(style="whitegrid")
+RANDOM_STATE = 42
+```
+
+# Clasificación: diagnóstico de cáncer de mama (Logistic Regression)
+
+## Justificación del algoritmo
+
+El dataset `breast-cancer.csv` (Wisconsin Diagnostic Breast Cancer) contiene 569 muestras con 30 características numéricas derivadas de biopsias digitalizadas, y una variable objetivo binaria `diagnosis` (Maligno/Benigno).
+
+Se usa **Logistic Regression** como algoritmo de clasificación (mismo algoritmo que en `DE/01_clasificacion_breast_cancer_alterno.ipynb`) porque:
+
+- Es el modelo lineal de referencia para clasificación binaria, con coeficientes interpretables en términos de efecto sobre la probabilidad de malignidad.
+- Contrasta directamente con el enfoque no lineal del Decision Tree usado en `SA/02_clasificacion_breast_cancer.ipynb`.
+- Requiere estandarización de variables, lo que permite mostrar un pipeline de preprocesamiento completo.
+
+## Diseño del modelo — paso a paso
+
+1. Carga y limpieza de datos (se descarta `id`, se codifica `diagnosis` como 0/1).
+2. División train/test estratificada.
+3. Pipeline de escalado (`StandardScaler`) + Logistic Regression.
+4. Modelo baseline sin optimizar.
+5. Búsqueda de hiperparámetros con `GridSearchCV` (`C`, `penalty`, `solver`).
+6. Evaluación con métricas de clasificación y matriz de confusión.
+7. Interpretación de coeficientes y curva ROC.
+
+```{python}
+from sklearn.model_selection import train_test_split, GridSearchCV, StratifiedKFold
+from sklearn.preprocessing import StandardScaler
+from sklearn.linear_model import LogisticRegression
+from sklearn.pipeline import Pipeline
+from sklearn.metrics import (accuracy_score, precision_score, recall_score, f1_score,
+                              roc_auc_score, roc_curve, confusion_matrix, ConfusionMatrixDisplay)
+
+df_bc = pd.read_csv("../datasets/breast-cancer.csv")
+df_bc = df_bc.drop(columns=[c for c in df_bc.columns if c.lower().startswith("unnamed")], errors="ignore")
+df_bc = df_bc.drop(columns=["id"])
+df_bc["diagnosis"] = df_bc["diagnosis"].map({"M": 1, "B": 0})
+
+X_bc = df_bc.drop(columns=["diagnosis"])
+y_bc = df_bc["diagnosis"]
+
+Xb_train, Xb_test, yb_train, yb_test = train_test_split(
+    X_bc, y_bc, test_size=0.2, stratify=y_bc, random_state=RANDOM_STATE
+)
+print(f"Train: {Xb_train.shape[0]} · Test: {Xb_test.shape[0]}")
+```
+
+## Evaluación y optimización
+
+```{python}
+pipe_bc = Pipeline([
+    ("scaler", StandardScaler()),
+    ("clf", LogisticRegression(max_iter=5000, random_state=RANDOM_STATE)),
+])
+
+param_grid_bc = {
+    "clf__C": [0.001, 0.01, 0.1, 1, 10, 100],
+    "clf__penalty": ["l1", "l2"],
+    "clf__solver": ["liblinear"],
+}
+
+cv_bc = StratifiedKFold(n_splits=5, shuffle=True, random_state=RANDOM_STATE)
+grid_bc = GridSearchCV(pipe_bc, param_grid=param_grid_bc, cv=cv_bc, scoring="f1", n_jobs=-1)
+grid_bc.fit(Xb_train, yb_train)
+
+print("Mejores hiperparámetros:", grid_bc.best_params_)
+print("Mejor F1 (CV):", round(grid_bc.best_score_, 4))
+```
+
+```{python}
+best_bc = grid_bc.best_estimator_
+pred_bc = best_bc.predict(Xb_test)
+proba_bc = best_bc.predict_proba(Xb_test)[:, 1]
+
+metrics_bc = {
+    "Accuracy": accuracy_score(yb_test, pred_bc),
+    "Precision": precision_score(yb_test, pred_bc),
+    "Recall": recall_score(yb_test, pred_bc),
+    "F1": f1_score(yb_test, pred_bc),
+    "ROC-AUC": roc_auc_score(yb_test, proba_bc),
+}
+pd.Series(metrics_bc).round(4)
+```
+
+> **Interpretación:** el modelo optimizado alcanza un desempeño alto en todas las métricas. El recall es la métrica de mayor interés clínico: un valor alto significa pocos falsos negativos (casos malignos no detectados), el error más costoso en este dominio.
+
+## Gráficas personalizadas e interpretación
+
+```{python}
+#| fig-cap: "Matriz de confusión — Logistic Regression optimizada"
+fig, ax = plt.subplots(figsize=(5, 5))
+cm = confusion_matrix(yb_test, pred_bc)
+ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=["Benigno", "Maligno"]).plot(
+    ax=ax, cmap="Purples", colorbar=False
+)
+plt.tight_layout()
+plt.show()
+```
+
+```{python}
+#| fig-cap: "Curva ROC — Logistic Regression optimizada"
+fpr, tpr, _ = roc_curve(yb_test, proba_bc)
+fig, ax = plt.subplots(figsize=(5.5, 5.5))
+ax.plot(fpr, tpr, color="#6A4C93", linewidth=2, label=f"AUC = {metrics_bc['ROC-AUC']:.3f}")
+ax.plot([0, 1], [0, 1], "k--", linewidth=1, label="Clasificador aleatorio")
+ax.set_xlabel("Tasa de falsos positivos")
+ax.set_ylabel("Tasa de verdaderos positivos")
+ax.legend()
+plt.tight_layout()
+plt.show()
+```
+
+```{python}
+#| fig-cap: "Variables con mayor efecto en la probabilidad de malignidad"
+coefs_bc = pd.Series(best_bc.named_steps["clf"].coef_[0], index=X_bc.columns).sort_values()
+top_coefs_bc = pd.concat([coefs_bc.head(5), coefs_bc.tail(5)])
+
+fig, ax = plt.subplots(figsize=(7, 6))
+colors = ["#A23B72" if v < 0 else "#2E86AB" for v in top_coefs_bc.values]
+ax.barh(top_coefs_bc.index, top_coefs_bc.values, color=colors)
+ax.axvline(0, color="black", linewidth=0.8)
+ax.set_xlabel("Coeficiente (escala estandarizada)")
+plt.tight_layout()
+plt.show()
+```
+
+> **Interpretación:** la matriz de confusión y la curva ROC confirman un modelo con muy buena capacidad de discriminación (AUC cercano a 1). El gráfico de coeficientes muestra qué variables (típicamente relacionadas con tamaño e irregularidad celular, p. ej. `radius_worst`, `concave points_worst`) más incrementan o disminuyen la probabilidad predicha de malignidad — una forma de interpretabilidad basada en efectos lineales globales, distinta a la de un árbol de decisión.
+
+# Regresión: predicción de carreras (`runs`) en béisbol (Ridge Regression)
+
+## Justificación del algoritmo
+
+El dataset `beisbol.csv` contiene 30 equipos con dos variables numéricas relevantes: `bateos` (predictor) y `runs` (objetivo). Se usa **Ridge Regression** (mismo algoritmo que en `DE/02_regresion_beisbol_alterno.ipynb`) porque:
+
+- Es un modelo lineal regularizado, más estable que una regresión lineal simple ante un dataset tan pequeño (30 observaciones).
+- Contrasta con el Random Forest Regressor no lineal usado en `SA/01_regresion_beisbol.ipynb`.
+- Su hiperparámetro `alpha` es directo de optimizar e interpretar.
+
+## Diseño del modelo — paso a paso
+
+1. Carga de datos y gráfica de dispersión del comportamiento (`bateos` vs `runs`).
+2. División train/test.
+3. Modelo baseline (Ridge con `alpha` por defecto).
+4. Búsqueda de hiperparámetros (`GridSearchCV` sobre `alpha`).
+5. Evaluación (R², MAE, RMSE) del modelo optimizado.
+6. Gráfica de valores reales vs. predichos.
+
+```{python}
+from sklearn.linear_model import Ridge
+from sklearn.metrics import r2_score, mean_absolute_error, mean_squared_error
+
+df_bb = pd.read_csv("../datasets/beisbol.csv", index_col=0)
+X_bb = df_bb[["bateos"]]
+y_bb = df_bb["runs"]
+```
+
+### Gráfica de dispersión del comportamiento de los datos
+
+```{python}
+#| fig-cap: "Dispersión: Bateos vs Runs por equipo"
+fig, ax = plt.subplots(figsize=(6.5, 4.5))
+ax.scatter(df_bb["bateos"], df_bb["runs"], color="#F18F01", s=60, edgecolor="white")
+ax.set_xlabel("Bateos (turnos al bate)")
+ax.set_ylabel("Runs (carreras anotadas)")
+plt.tight_layout()
+plt.show()
+```
+
+> **Interpretación:** se observa una tendencia lineal positiva con dispersión considerable — escenario razonable para un modelo lineal regularizado.
+
+## Evaluación y optimización
+
+```{python}
+Xbb_train, Xbb_test, ybb_train, ybb_test = train_test_split(
+    X_bb, y_bb, test_size=0.2, random_state=RANDOM_STATE
+)
+
+baseline_bb = Ridge(random_state=RANDOM_STATE)
+baseline_bb.fit(Xbb_train, ybb_train)
+pred_baseline_bb = baseline_bb.predict(Xbb_test)
+
+param_grid_bb = {"alpha": [0.001, 0.01, 0.1, 1, 5, 10, 50, 100, 500, 1000]}
+grid_bb = GridSearchCV(Ridge(random_state=RANDOM_STATE), param_grid=param_grid_bb, cv=5, scoring="r2", n_jobs=-1)
+grid_bb.fit(Xbb_train, ybb_train)
+
+print("Mejor alpha:", grid_bb.best_params_["alpha"])
+print("Mejor R2 (CV):", round(grid_bb.best_score_, 4))
+```
+
+```{python}
+best_bb = grid_bb.best_estimator_
+pred_best_bb = best_bb.predict(Xbb_test)
+
+r2_bb = r2_score(ybb_test, pred_best_bb)
+mae_bb = mean_absolute_error(ybb_test, pred_best_bb)
+rmse_bb = mean_squared_error(ybb_test, pred_best_bb) ** 0.5
+
+pd.DataFrame({
+    "Métrica": ["R2", "MAE", "RMSE"],
+    "Baseline": [
+        r2_score(ybb_test, pred_baseline_bb),
+        mean_absolute_error(ybb_test, pred_baseline_bb),
+        mean_squared_error(ybb_test, pred_baseline_bb) ** 0.5,
+    ],
+    "Optimizado": [r2_bb, mae_bb, rmse_bb],
+})
+```
+
+> **Interpretación:** con solo 30 observaciones y un único predictor, el R² sobre un conjunto de prueba de 6 equipos tiene alta varianza y debe interpretarse con cautela; el R² de validación cruzada (que promedia 5 particiones del conjunto de entrenamiento) es la referencia más confiable para evaluar qué tan bien generaliza el modelo.
+
+## Gráficas personalizadas e interpretación
+
+```{python}
+#| fig-cap: "Valores reales vs. predichos — Ridge Regression"
+fig, ax = plt.subplots(figsize=(5.5, 5.5))
+ax.scatter(ybb_test, pred_baseline_bb, color="#F18F01", label="Baseline", s=70, alpha=0.8)
+ax.scatter(ybb_test, pred_best_bb, color="#6A4C93", label="Optimizado", s=70, alpha=0.8)
+lims = [min(ybb_test.min(), pred_best_bb.min(), pred_baseline_bb.min()) - 20,
+        max(ybb_test.max(), pred_best_bb.max(), pred_baseline_bb.max()) + 20]
+ax.plot(lims, lims, "k--", linewidth=1, label="Predicción perfecta")
+ax.set_xlabel("Runs reales")
+ax.set_ylabel("Runs predichos")
+ax.legend()
+plt.tight_layout()
+plt.show()
+```
+
+> **Interpretación:** los puntos cercanos a la diagonal indican predicciones acertadas. La regularización (`alpha` óptimo) contrae la pendiente del modelo para reducir su sensibilidad a datos atípicos del conjunto de entrenamiento, a costa de cierto sesgo — el clásico trade-off sesgo-varianza que Ridge gestiona explícitamente mediante su hiperparámetro.
+
+# Conclusión general
+
+Este documento reproduce, con **Quarto** como herramienta alternativa a Jupyter Notebook, los dos análisis de la sección DE de la evaluación: clasificación con Logistic Regression sobre `breast-cancer.csv` y regresión con Ridge sobre `beisbol.csv`. Todo el código mostrado se ejecutó al momento de generar este documento (no son capturas de pantalla ni resultados pegados manualmente), demostrando que un flujo de trabajo de ciencia de datos reproducible puede documentarse fuera del entorno de notebooks interactivos, con el mismo rigor de justificación, diseño, evaluación, optimización de hiperparámetros e interpretación de resultados.
+
+Los modelos entrenados en las secciones SA y DE, junto con este documento, están disponibles en el repositorio del proyecto (ver `README.md`).
