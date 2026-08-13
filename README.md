@@ -13,7 +13,7 @@ Profesor: Filiberto Ruiz Hernández
 - `DE/` — Algoritmos alternos, vistos en clase
   - `01_clasificacion_breast_cancer_alterno.ipynb` — Clasificación (Logistic Regression)
   - `02_regresion_beisbol_alterno.ipynb` — Regresión (Ridge Regression)
-- `AU/` — Documento elaborado con herramienta alternativa a Jupyter Notebook (Quarto)
+- `AU/` — Documento elaborado con herramienta alternativa a Jupyter Notebook (Quarto), rehaciendo los 6 análisis de SA y DE
   - `documento.qmd` / `documento.html`
 - `datasets/` — Conjuntos de datos usados
 - `models/` — Modelos entrenados (.joblib) y gráficas exportadas (.png)
@@ -28,12 +28,8 @@ Profesor: Filiberto Ruiz Hernández
 | SA-4 (reducción dim., comprar_alquilar) | PCA | 7/9 componentes para ≥95% var. explicada |
 | DE-1 (clasificación alterna, breast-cancer) | Logistic Regression | F1 = 0.964 · ROC-AUC = 0.996 |
 | DE-2 (regresión alterna, beisbol) | Ridge Regression | R² CV = 0.209 |
-| AU | Logistic Regression + Ridge, documentados en Quarto | ver `AU/documento.html` |
+| AU | Los 6 análisis anteriores (SA-1 a SA-4, DE-1, DE-2) rehechos en Quarto | ver `AU/documento.html` |
 
 ## Cómo ver el documento AU
 
-`AU/documento.html` es un archivo HTML autocontenido (código, texto y gráficas embebidas). GitHub no lo renderiza directamente al verlo en el navegador del repositorio — para visualizarlo con estilo, descárgalo y ábrelo localmente, o usa un visor como https://htmlpreview.github.io/ pegando la URL "raw" del archivo.
-
-## Nota sobre el alcance de AU
-
-El enunciado de AU indica elaborar el documento "con base en los conjuntos de datos de las evaluaciones DE y AU". Dado que AU no tiene datasets propios, se interpretó como una referencia a los datasets de **DE** (clasificación de `breast-cancer.csv` y regresión de `beisbol.csv`), documentados aquí con Quarto en vez de Jupyter Notebook. Si el profesor esperaba otro alcance (p. ej. los 4 datasets de SA), se puede ajustar.
+`AU/documento.html` es un archivo HTML autocontenido (código, texto y gráficas embebidas) que rehace, con Quarto en vez de Jupyter Notebook, los seis análisis de SA y DE. GitHub no lo renderiza directamente al verlo en el navegador del repositorio — para visualizarlo con estilo, descárgalo y ábrelo localmente, o usa un visor como https://htmlpreview.github.io/ pegando la URL "raw" del archivo.

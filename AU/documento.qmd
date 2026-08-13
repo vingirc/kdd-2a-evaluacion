@@ -22,7 +22,16 @@ execute:
 
 Este documento **no fue elaborado en Jupyter Notebook**, sino con **[Quarto](https://quarto.org)**, un sistema de publicación científica que combina texto narrativo (Markdown) con código ejecutable (Python), y se renderiza a un documento final autocontenido (HTML). El código de cada sección se ejecuta realmente al generar el documento — los resultados, métricas y gráficas que se muestran a continuación no son capturas de un notebook, sino la salida directa de la ejecución de este archivo `.qmd`.
 
-Se retoman los dos análisis desarrollados en la sección **DE** de esta evaluación — clasificación sobre `breast-cancer.csv` y regresión sobre `beisbol.csv` — pero documentados aquí con esta herramienta alternativa, con el mismo rigor de justificación, diseño, evaluación/optimización y gráficas interpretadas.
+Se rehacen aquí, con esta herramienta alternativa, los **seis análisis** desarrollados en las secciones **SA** y **DE** de esta evaluación:
+
+1. Regresión — `beisbol.csv` — Random Forest Regressor (SA-1)
+2. Clasificación — `breast-cancer.csv` — Decision Tree (SA-2)
+3. Agrupación — `samsung.csv` — K-Means (SA-3)
+4. Reducción de dimensionalidad — `comprar_alquilar.csv` — PCA (SA-4)
+5. Clasificación alterna — `breast-cancer.csv` — Logistic Regression (DE-1)
+6. Regresión alterna — `beisbol.csv` — Ridge Regression (DE-2)
+
+Cada sección conserva la misma estructura de reporte: justificación del algoritmo, diseño paso a paso, evaluación/optimización de hiperparámetros, y gráficas personalizadas con interpretación.
 
 ```{python}
 #| echo: false
@@ -36,152 +45,30 @@ sns.set_theme(style="whitegrid")
 RANDOM_STATE = 42
 ```
 
-# Clasificación: diagnóstico de cáncer de mama (Logistic Regression)
+# SA-1 · Regresión: predicción de carreras (`runs`) — Random Forest Regressor
 
 ## Justificación del algoritmo
 
-El dataset `breast-cancer.csv` (Wisconsin Diagnostic Breast Cancer) contiene 569 muestras con 30 características numéricas derivadas de biopsias digitalizadas, y una variable objetivo binaria `diagnosis` (Maligno/Benigno).
+El dataset `beisbol.csv` contiene 30 equipos con dos variables numéricas relevantes: `bateos` (turnos al bate, predictor) y `runs` (carreras anotadas, objetivo). La columna `equipos` es un identificador con cardinalidad casi igual al número de filas, por lo que se descarta como feature.
 
-Se usa **Logistic Regression** como algoritmo de clasificación (mismo algoritmo que en `DE/01_clasificacion_breast_cancer_alterno.ipynb`) porque:
+Se eligió **Random Forest Regressor** porque:
 
-- Es el modelo lineal de referencia para clasificación binaria, con coeficientes interpretables en términos de efecto sobre la probabilidad de malignidad.
-- Contrasta directamente con el enfoque no lineal del Decision Tree usado en `SA/02_clasificacion_breast_cancer.ipynb`.
-- Requiere estandarización de variables, lo que permite mostrar un pipeline de preprocesamiento completo.
-
-## Diseño del modelo — paso a paso
-
-1. Carga y limpieza de datos (se descarta `id`, se codifica `diagnosis` como 0/1).
-2. División train/test estratificada.
-3. Pipeline de escalado (`StandardScaler`) + Logistic Regression.
-4. Modelo baseline sin optimizar.
-5. Búsqueda de hiperparámetros con `GridSearchCV` (`C`, `penalty`, `solver`).
-6. Evaluación con métricas de clasificación y matriz de confusión.
-7. Interpretación de coeficientes y curva ROC.
-
-```{python}
-from sklearn.model_selection import train_test_split, GridSearchCV, StratifiedKFold
-from sklearn.preprocessing import StandardScaler
-from sklearn.linear_model import LogisticRegression
-from sklearn.pipeline import Pipeline
-from sklearn.metrics import (accuracy_score, precision_score, recall_score, f1_score,
-                              roc_auc_score, roc_curve, confusion_matrix, ConfusionMatrixDisplay)
-
-df_bc = pd.read_csv("../datasets/breast-cancer.csv")
-df_bc = df_bc.drop(columns=[c for c in df_bc.columns if c.lower().startswith("unnamed")], errors="ignore")
-df_bc = df_bc.drop(columns=["id"])
-df_bc["diagnosis"] = df_bc["diagnosis"].map({"M": 1, "B": 0})
-
-X_bc = df_bc.drop(columns=["diagnosis"])
-y_bc = df_bc["diagnosis"]
-
-Xb_train, Xb_test, yb_train, yb_test = train_test_split(
-    X_bc, y_bc, test_size=0.2, stratify=y_bc, random_state=RANDOM_STATE
-)
-print(f"Train: {Xb_train.shape[0]} · Test: {Xb_test.shape[0]}")
-```
-
-## Evaluación y optimización
-
-```{python}
-pipe_bc = Pipeline([
-    ("scaler", StandardScaler()),
-    ("clf", LogisticRegression(max_iter=5000, random_state=RANDOM_STATE)),
-])
-
-param_grid_bc = {
-    "clf__C": [0.001, 0.01, 0.1, 1, 10, 100],
-    "clf__penalty": ["l1", "l2"],
-    "clf__solver": ["liblinear"],
-}
-
-cv_bc = StratifiedKFold(n_splits=5, shuffle=True, random_state=RANDOM_STATE)
-grid_bc = GridSearchCV(pipe_bc, param_grid=param_grid_bc, cv=cv_bc, scoring="f1", n_jobs=-1)
-grid_bc.fit(Xb_train, yb_train)
-
-print("Mejores hiperparámetros:", grid_bc.best_params_)
-print("Mejor F1 (CV):", round(grid_bc.best_score_, 4))
-```
-
-```{python}
-best_bc = grid_bc.best_estimator_
-pred_bc = best_bc.predict(Xb_test)
-proba_bc = best_bc.predict_proba(Xb_test)[:, 1]
-
-metrics_bc = {
-    "Accuracy": accuracy_score(yb_test, pred_bc),
-    "Precision": precision_score(yb_test, pred_bc),
-    "Recall": recall_score(yb_test, pred_bc),
-    "F1": f1_score(yb_test, pred_bc),
-    "ROC-AUC": roc_auc_score(yb_test, proba_bc),
-}
-pd.Series(metrics_bc).round(4)
-```
-
-> **Interpretación:** el modelo optimizado alcanza un desempeño alto en todas las métricas. El recall es la métrica de mayor interés clínico: un valor alto significa pocos falsos negativos (casos malignos no detectados), el error más costoso en este dominio.
-
-## Gráficas personalizadas e interpretación
-
-```{python}
-#| fig-cap: "Matriz de confusión — Logistic Regression optimizada"
-fig, ax = plt.subplots(figsize=(5, 5))
-cm = confusion_matrix(yb_test, pred_bc)
-ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=["Benigno", "Maligno"]).plot(
-    ax=ax, cmap="Purples", colorbar=False
-)
-plt.tight_layout()
-plt.show()
-```
-
-```{python}
-#| fig-cap: "Curva ROC — Logistic Regression optimizada"
-fpr, tpr, _ = roc_curve(yb_test, proba_bc)
-fig, ax = plt.subplots(figsize=(5.5, 5.5))
-ax.plot(fpr, tpr, color="#6A4C93", linewidth=2, label=f"AUC = {metrics_bc['ROC-AUC']:.3f}")
-ax.plot([0, 1], [0, 1], "k--", linewidth=1, label="Clasificador aleatorio")
-ax.set_xlabel("Tasa de falsos positivos")
-ax.set_ylabel("Tasa de verdaderos positivos")
-ax.legend()
-plt.tight_layout()
-plt.show()
-```
-
-```{python}
-#| fig-cap: "Variables con mayor efecto en la probabilidad de malignidad"
-coefs_bc = pd.Series(best_bc.named_steps["clf"].coef_[0], index=X_bc.columns).sort_values()
-top_coefs_bc = pd.concat([coefs_bc.head(5), coefs_bc.tail(5)])
-
-fig, ax = plt.subplots(figsize=(7, 6))
-colors = ["#A23B72" if v < 0 else "#2E86AB" for v in top_coefs_bc.values]
-ax.barh(top_coefs_bc.index, top_coefs_bc.values, color=colors)
-ax.axvline(0, color="black", linewidth=0.8)
-ax.set_xlabel("Coeficiente (escala estandarizada)")
-plt.tight_layout()
-plt.show()
-```
-
-> **Interpretación:** la matriz de confusión y la curva ROC confirman un modelo con muy buena capacidad de discriminación (AUC cercano a 1). El gráfico de coeficientes muestra qué variables (típicamente relacionadas con tamaño e irregularidad celular, p. ej. `radius_worst`, `concave points_worst`) más incrementan o disminuyen la probabilidad predicha de malignidad — una forma de interpretabilidad basada en efectos lineales globales, distinta a la de un árbol de decisión.
-
-# Regresión: predicción de carreras (`runs`) en béisbol (Ridge Regression)
-
-## Justificación del algoritmo
-
-El dataset `beisbol.csv` contiene 30 equipos con dos variables numéricas relevantes: `bateos` (predictor) y `runs` (objetivo). Se usa **Ridge Regression** (mismo algoritmo que en `DE/02_regresion_beisbol_alterno.ipynb`) porque:
-
-- Es un modelo lineal regularizado, más estable que una regresión lineal simple ante un dataset tan pequeño (30 observaciones).
-- Contrasta con el Random Forest Regressor no lineal usado en `SA/01_regresion_beisbol.ipynb`.
-- Su hiperparámetro `alpha` es directo de optimizar e interpretar.
+- Permite contrastar con los modelos lineales vistos en clase (regresión lineal, Ridge) y evaluar si existe una relación no lineal entre `bateos` y `runs`.
+- Aprovecha la robustez de un ensamble de árboles ante el ruido, dado que el dataset es muy pequeño (30 observaciones).
+- Tiene varios hiperparámetros relevantes (`n_estimators`, `max_depth`, `min_samples_leaf`) que permiten una búsqueda de hiperparámetros no trivial.
 
 ## Diseño del modelo — paso a paso
 
 1. Carga de datos y gráfica de dispersión del comportamiento (`bateos` vs `runs`).
 2. División train/test.
-3. Modelo baseline (Ridge con `alpha` por defecto).
-4. Búsqueda de hiperparámetros (`GridSearchCV` sobre `alpha`).
-5. Evaluación (R², MAE, RMSE) del modelo optimizado.
-6. Gráfica de valores reales vs. predichos.
+3. Modelo baseline (Random Forest por defecto).
+4. Búsqueda de hiperparámetros con `GridSearchCV`.
+5. Evaluación del modelo optimizado (R², MAE, RMSE) contra el baseline.
+6. Gráfica de valores reales vs. predichos e importancia de variables.
 
 ```{python}
-from sklearn.linear_model import Ridge
+from sklearn.model_selection import train_test_split, GridSearchCV
+from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import r2_score, mean_absolute_error, mean_squared_error
 
 df_bb = pd.read_csv("../datasets/beisbol.csv", index_col=0)
@@ -194,64 +81,67 @@ y_bb = df_bb["runs"]
 ```{python}
 #| fig-cap: "Dispersión: Bateos vs Runs por equipo"
 fig, ax = plt.subplots(figsize=(6.5, 4.5))
-ax.scatter(df_bb["bateos"], df_bb["runs"], color="#F18F01", s=60, edgecolor="white")
+ax.scatter(df_bb["bateos"], df_bb["runs"], color="#2E86AB", s=60, edgecolor="white")
 ax.set_xlabel("Bateos (turnos al bate)")
 ax.set_ylabel("Runs (carreras anotadas)")
 plt.tight_layout()
 plt.show()
 ```
 
-> **Interpretación:** se observa una tendencia lineal positiva con dispersión considerable — escenario razonable para un modelo lineal regularizado.
+> **Interpretación:** se observa una tendencia positiva moderada entre `bateos` y `runs`, con dispersión considerable — otros factores no presentes en el dataset también influyen.
 
 ## Evaluación y optimización
 
 ```{python}
-Xbb_train, Xbb_test, ybb_train, ybb_test = train_test_split(
-    X_bb, y_bb, test_size=0.2, random_state=RANDOM_STATE
-)
+Xrf_train, Xrf_test, yrf_train, yrf_test = train_test_split(X_bb, y_bb, test_size=0.2, random_state=RANDOM_STATE)
 
-baseline_bb = Ridge(random_state=RANDOM_STATE)
-baseline_bb.fit(Xbb_train, ybb_train)
-pred_baseline_bb = baseline_bb.predict(Xbb_test)
+baseline_rf = RandomForestRegressor(random_state=RANDOM_STATE)
+baseline_rf.fit(Xrf_train, yrf_train)
+pred_baseline_rf = baseline_rf.predict(Xrf_test)
 
-param_grid_bb = {"alpha": [0.001, 0.01, 0.1, 1, 5, 10, 50, 100, 500, 1000]}
-grid_bb = GridSearchCV(Ridge(random_state=RANDOM_STATE), param_grid=param_grid_bb, cv=5, scoring="r2", n_jobs=-1)
-grid_bb.fit(Xbb_train, ybb_train)
-
-print("Mejor alpha:", grid_bb.best_params_["alpha"])
-print("Mejor R2 (CV):", round(grid_bb.best_score_, 4))
+param_grid_rf = {
+    "n_estimators": [50, 100, 200, 400],
+    "max_depth": [None, 2, 3, 4, 6],
+    "min_samples_leaf": [1, 2, 3, 4],
+    "max_features": [None, "sqrt"],
+}
+grid_rf = GridSearchCV(RandomForestRegressor(random_state=RANDOM_STATE), param_grid=param_grid_rf,
+                        cv=5, scoring="r2", n_jobs=-1)
+grid_rf.fit(Xrf_train, yrf_train)
+print("Mejores hiperparámetros:", grid_rf.best_params_)
+print("Mejor R2 (CV):", round(grid_rf.best_score_, 4))
 ```
 
 ```{python}
-best_bb = grid_bb.best_estimator_
-pred_best_bb = best_bb.predict(Xbb_test)
-
-r2_bb = r2_score(ybb_test, pred_best_bb)
-mae_bb = mean_absolute_error(ybb_test, pred_best_bb)
-rmse_bb = mean_squared_error(ybb_test, pred_best_bb) ** 0.5
+best_rf = grid_rf.best_estimator_
+pred_best_rf = best_rf.predict(Xrf_test)
 
 pd.DataFrame({
     "Métrica": ["R2", "MAE", "RMSE"],
     "Baseline": [
-        r2_score(ybb_test, pred_baseline_bb),
-        mean_absolute_error(ybb_test, pred_baseline_bb),
-        mean_squared_error(ybb_test, pred_baseline_bb) ** 0.5,
+        r2_score(yrf_test, pred_baseline_rf),
+        mean_absolute_error(yrf_test, pred_baseline_rf),
+        mean_squared_error(yrf_test, pred_baseline_rf) ** 0.5,
     ],
-    "Optimizado": [r2_bb, mae_bb, rmse_bb],
+    "Optimizado": [
+        r2_score(yrf_test, pred_best_rf),
+        mean_absolute_error(yrf_test, pred_best_rf),
+        mean_squared_error(yrf_test, pred_best_rf) ** 0.5,
+    ],
 })
 ```
 
-> **Interpretación:** con solo 30 observaciones y un único predictor, el R² sobre un conjunto de prueba de 6 equipos tiene alta varianza y debe interpretarse con cautela; el R² de validación cruzada (que promedia 5 particiones del conjunto de entrenamiento) es la referencia más confiable para evaluar qué tan bien generaliza el modelo.
+> **Interpretación:** con solo 30 observaciones y 6 datos de prueba, el R² del test set tiene alta varianza; el R² de validación cruzada (que promedia 5 particiones del entrenamiento) es la referencia más confiable para evaluar generalización.
 
 ## Gráficas personalizadas e interpretación
 
 ```{python}
-#| fig-cap: "Valores reales vs. predichos — Ridge Regression"
+#| fig-cap: "Valores reales vs. predichos — Random Forest Regressor"
 fig, ax = plt.subplots(figsize=(5.5, 5.5))
-ax.scatter(ybb_test, pred_baseline_bb, color="#F18F01", label="Baseline", s=70, alpha=0.8)
-ax.scatter(ybb_test, pred_best_bb, color="#6A4C93", label="Optimizado", s=70, alpha=0.8)
-lims = [min(ybb_test.min(), pred_best_bb.min(), pred_baseline_bb.min()) - 20,
-        max(ybb_test.max(), pred_best_bb.max(), pred_baseline_bb.max()) + 20]
+ax.scatter(yrf_test, pred_baseline_rf, color="#A23B72", label="Baseline", s=70, alpha=0.8)
+ax.scatter(yrf_test, pred_best_rf, color="#2E86AB", label="Optimizado", s=70, alpha=0.8)
+lims = [min(yrf_test.min(), pred_best_rf.min(), pred_baseline_rf.min()) - 20,
+        max(yrf_test.max(), pred_best_rf.max(), pred_baseline_rf.max()) + 20]
 ax.plot(lims, lims, "k--", linewidth=1, label="Predicción perfecta")
 ax.set_xlabel("Runs reales")
 ax.set_ylabel("Runs predichos")
@@ -260,10 +150,427 @@ plt.tight_layout()
 plt.show()
 ```
 
-> **Interpretación:** los puntos cercanos a la diagonal indican predicciones acertadas. La regularización (`alpha` óptimo) contrae la pendiente del modelo para reducir su sensibilidad a datos atípicos del conjunto de entrenamiento, a costa de cierto sesgo — el clásico trade-off sesgo-varianza que Ridge gestiona explícitamente mediante su hiperparámetro.
+> **Interpretación:** los puntos cercanos a la diagonal indican predicciones acertadas. El modelo optimizado se acerca más a la diagonal que el baseline en la mayoría de los casos, evidenciando el beneficio de la búsqueda de hiperparámetros.
+
+# SA-2 · Clasificación: diagnóstico de cáncer de mama — Decision Tree
+
+## Justificación del algoritmo
+
+El dataset `breast-cancer.csv` (Wisconsin Diagnostic Breast Cancer) contiene 569 muestras con 30 características numéricas derivadas de biopsias digitalizadas, y variable objetivo binaria `diagnosis`.
+
+Se eligió **Decision Tree Classifier** porque:
+
+- Es completamente interpretable: se puede graficar el árbol completo y explicar la ruta de decisión de cada predicción.
+- No requiere escalado de variables.
+- Captura interacciones no lineales entre variables sin ingeniería de características manual.
+
+## Diseño del modelo — paso a paso
+
+1. Carga y limpieza (se descarta `id`, se codifica `diagnosis` como 0/1).
+2. División train/test estratificada.
+3. Modelo baseline (árbol sin restricciones).
+4. Búsqueda de hiperparámetros con `GridSearchCV`.
+5. Evaluación con métricas de clasificación y matriz de confusión.
+6. Gráfica del árbol completo optimizado.
+
+```{python}
+from sklearn.model_selection import StratifiedKFold
+from sklearn.tree import DecisionTreeClassifier, plot_tree
+from sklearn.metrics import (accuracy_score, precision_score, recall_score, f1_score,
+                              roc_auc_score, roc_curve, confusion_matrix, ConfusionMatrixDisplay)
+
+df_bc = pd.read_csv("../datasets/breast-cancer.csv")
+df_bc = df_bc.drop(columns=[c for c in df_bc.columns if c.lower().startswith("unnamed")], errors="ignore")
+df_bc = df_bc.drop(columns=["id"])
+df_bc["diagnosis"] = df_bc["diagnosis"].map({"M": 1, "B": 0})
+
+X_bc = df_bc.drop(columns=["diagnosis"])
+y_bc = df_bc["diagnosis"]
+
+Xdt_train, Xdt_test, ydt_train, ydt_test = train_test_split(
+    X_bc, y_bc, test_size=0.2, stratify=y_bc, random_state=RANDOM_STATE
+)
+print(f"Train: {Xdt_train.shape[0]} · Test: {Xdt_test.shape[0]}")
+```
+
+## Evaluación y optimización
+
+```{python}
+param_grid_dt = {
+    "max_depth": [2, 3, 4, 5, 6, 8, None],
+    "min_samples_split": [2, 5, 10, 20],
+    "min_samples_leaf": [1, 2, 5, 10],
+    "criterion": ["gini", "entropy"],
+}
+cv_dt = StratifiedKFold(n_splits=5, shuffle=True, random_state=RANDOM_STATE)
+grid_dt = GridSearchCV(DecisionTreeClassifier(random_state=RANDOM_STATE), param_grid=param_grid_dt,
+                        cv=cv_dt, scoring="f1", n_jobs=-1)
+grid_dt.fit(Xdt_train, ydt_train)
+print("Mejores hiperparámetros:", grid_dt.best_params_)
+print("Mejor F1 (CV):", round(grid_dt.best_score_, 4))
+```
+
+```{python}
+best_dt = grid_dt.best_estimator_
+pred_dt = best_dt.predict(Xdt_test)
+proba_dt = best_dt.predict_proba(Xdt_test)[:, 1]
+
+metrics_dt = {
+    "Accuracy": accuracy_score(ydt_test, pred_dt),
+    "Precision": precision_score(ydt_test, pred_dt),
+    "Recall": recall_score(ydt_test, pred_dt),
+    "F1": f1_score(ydt_test, pred_dt),
+    "ROC-AUC": roc_auc_score(ydt_test, proba_dt),
+}
+pd.Series(metrics_dt).round(4)
+```
+
+> **Interpretación:** el recall es la métrica de mayor interés clínico — un valor alto significa pocos falsos negativos (casos malignos no detectados).
+
+## Gráficas personalizadas e interpretación
+
+```{python}
+#| fig-cap: "Matriz de confusión — Decision Tree optimizado"
+fig, ax = plt.subplots(figsize=(5, 5))
+cm_dt = confusion_matrix(ydt_test, pred_dt)
+ConfusionMatrixDisplay(confusion_matrix=cm_dt, display_labels=["Benigno", "Maligno"]).plot(
+    ax=ax, cmap="Blues", colorbar=False
+)
+plt.tight_layout()
+plt.show()
+```
+
+```{python}
+#| fig-cap: "Árbol de decisión completo"
+fig, ax = plt.subplots(figsize=(20, 10))
+plot_tree(best_dt, feature_names=X_bc.columns, class_names=["Benigno", "Maligno"],
+          filled=True, rounded=True, fontsize=7, ax=ax)
+plt.tight_layout()
+plt.show()
+```
+
+> **Interpretación:** el árbol divide primero por las variables de mayor poder discriminante (típicamente relacionadas con tamaño e irregularidad celular, p. ej. `perimeter_worst`, `concave points_worst` o `radius_worst`), consistente con el conocimiento clínico de que tumores malignos tienden a tener células más grandes e irregulares.
+
+# SA-3 · Agrupación: regímenes de mercado en la acción de Samsung — K-Means
+
+## Justificación del algoritmo
+
+El dataset `samsung.csv` solo tiene `Date`, `Close` y `Volume` — series de tiempo, no observaciones independientes. Se construyen variables derivadas del comportamiento diario: `retorno` (variación % del cierre), `volatilidad_5d` (desviación estándar móvil a 5 días) y `volumen_norm` (volumen estandarizado).
+
+Se eligió **K-Means** porque:
+
+- Es eficiente y escala bien con las ~2,850 observaciones diarias.
+- Con variables continuas estandarizadas, la distancia euclidiana a un centroide es interpretable como similitud de comportamiento de mercado.
+- Permite optimizar objetivamente el número de clusters `k` con el método del codo y el coeficiente de silueta.
+
+## Diseño del modelo — paso a paso
+
+1. Carga de datos e ingeniería de variables.
+2. Estandarización (`StandardScaler`).
+3. Optimización de `k`: método del codo + coeficiente de silueta.
+4. Ajuste del modelo final y visualización de clusters.
+
+```{python}
+import matplotlib.dates as mdates
+from sklearn.preprocessing import StandardScaler
+from sklearn.cluster import KMeans
+from sklearn.metrics import silhouette_score
+
+df_sm = pd.read_csv("../datasets/samsung.csv")
+df_sm["Date"] = pd.to_datetime(df_sm["Date"], format="%d/%m/%Y")
+df_sm = df_sm.sort_values("Date").reset_index(drop=True)
+
+df_sm["retorno"] = df_sm["Close"].pct_change() * 100
+df_sm["volatilidad_5d"] = df_sm["retorno"].rolling(window=5).std()
+df_sm["volumen_norm"] = (df_sm["Volume"] - df_sm["Volume"].mean()) / df_sm["Volume"].std()
+
+df_sm_feat = df_sm.dropna(subset=["retorno", "volatilidad_5d", "volumen_norm"]).reset_index(drop=True)
+feature_cols_sm = ["retorno", "volatilidad_5d", "volumen_norm"]
+X_sm = df_sm_feat[feature_cols_sm].values
+
+scaler_sm = StandardScaler()
+X_sm_scaled = scaler_sm.fit_transform(X_sm)
+print(f"Filas utilizables: {df_sm_feat.shape[0]} de {df_sm.shape[0]}")
+```
+
+## Optimización del modelo — elección de `k`
+
+```{python}
+inertias, silhouettes = [], []
+k_range = range(2, 11)
+for k in k_range:
+    km = KMeans(n_clusters=k, random_state=RANDOM_STATE, n_init=10)
+    labels = km.fit_predict(X_sm_scaled)
+    inertias.append(km.inertia_)
+    silhouettes.append(silhouette_score(X_sm_scaled, labels))
+
+best_k = list(k_range)[int(np.argmax(silhouettes))]
+print(f"k óptimo según silueta: {best_k} (silueta={max(silhouettes):.4f})")
+```
+
+```{python}
+#| fig-cap: "Método del codo y coeficiente de silueta"
+fig, axes = plt.subplots(1, 2, figsize=(12, 4.5))
+axes[0].plot(list(k_range), inertias, marker="o", color="#2E86AB")
+axes[0].set_xlabel("k"); axes[0].set_ylabel("Inercia"); axes[0].set_title("Método del codo")
+axes[1].plot(list(k_range), silhouettes, marker="o", color="#A23B72")
+axes[1].set_xlabel("k"); axes[1].set_ylabel("Silueta"); axes[1].set_title("Coeficiente de silueta")
+plt.tight_layout()
+plt.show()
+```
+
+> **Interpretación:** la silueta es máxima en k=2 y decae conforme k crece, mientras la inercia disminuye de forma gradual sin un quiebre abrupto — típico de datos financieros donde el comportamiento diario es un continuo. Se elige k=2, correspondiente a **días de mercado calmado** vs. **días de mercado turbulento**.
+
+## Gráficas personalizadas e interpretación
+
+```{python}
+final_km = KMeans(n_clusters=best_k, random_state=RANDOM_STATE, n_init=10)
+df_sm_feat["cluster"] = final_km.fit_predict(X_sm_scaled)
+```
+
+```{python}
+#| fig-cap: "Clusters de comportamiento diario"
+fig, ax = plt.subplots(figsize=(7, 5.5))
+scatter = ax.scatter(df_sm_feat["retorno"], df_sm_feat["volatilidad_5d"],
+                      c=df_sm_feat["cluster"], cmap="viridis", s=20, alpha=0.7)
+ax.set_xlabel("Retorno diario (%)")
+ax.set_ylabel("Volatilidad móvil (5 días)")
+legend = ax.legend(*scatter.legend_elements(), title="Cluster")
+ax.add_artist(legend)
+plt.tight_layout()
+plt.show()
+```
+
+```{python}
+#| fig-cap: "Precio de cierre coloreado por régimen de mercado"
+fig, ax = plt.subplots(figsize=(12, 4.5))
+scatter = ax.scatter(df_sm_feat["Date"], df_sm_feat["Close"], c=df_sm_feat["cluster"],
+                      cmap="viridis", s=10, alpha=0.8)
+ax.xaxis.set_major_locator(mdates.YearLocator())
+ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y"))
+ax.set_xlabel("Fecha"); ax.set_ylabel("Precio de cierre")
+legend = ax.legend(*scatter.legend_elements(), title="Cluster")
+ax.add_artist(legend)
+plt.tight_layout()
+plt.show()
+```
+
+> **Interpretación:** la gráfica temporal muestra en qué tramos del histórico predominó cada régimen de mercado, útil para detectar visualmente periodos de crisis o estabilidad sin usar ninguna etiqueta externa.
+
+# SA-4 · Reducción de dimensionalidad: comprar vs. alquilar vivienda — PCA
+
+## Justificación del algoritmo
+
+El dataset `comprar_alquilar.csv` tiene 9 variables con escalas radicalmente distintas (`vivienda` en cientos de miles, `estado_civil`/`hijos` en un rango de 0–5). Se eligió **PCA** porque es el algoritmo estándar de reducción lineal, y este dataset expone claramente por qué el escalamiento importa: sin estandarizar, `vivienda` dominaría la varianza total.
+
+## Diseño del modelo — paso a paso
+
+1. Carga de datos y separación de la variable objetivo (`comprar`, usada solo para colorear).
+2. PCA sin escalar vs. PCA con `StandardScaler` (2 componentes).
+3. Varianza explicada por componente (scree plot).
+4. Elección del número de componentes y justificación.
+
+```{python}
+from sklearn.decomposition import PCA
+
+df_ca = pd.read_csv("../datasets/comprar_alquilar.csv")
+target_ca = df_ca["comprar"]
+X_ca = df_ca.drop(columns=["comprar"])
+
+pca_sin = PCA(n_components=2, random_state=RANDOM_STATE)
+X_pca_sin = pca_sin.fit_transform(X_ca)
+
+scaler_ca = StandardScaler()
+X_ca_scaled = scaler_ca.fit_transform(X_ca)
+pca_con = PCA(n_components=2, random_state=RANDOM_STATE)
+X_pca_con = pca_con.fit_transform(X_ca_scaled)
+
+print("Varianza explicada (sin escalar):", np.round(pca_sin.explained_variance_ratio_, 4))
+print("Varianza explicada (con escalar):", np.round(pca_con.explained_variance_ratio_, 4))
+```
+
+## Gráficas personalizadas e interpretación
+
+```{python}
+#| fig-cap: "PCA sin escalamiento vs. con escalamiento"
+fig, axes = plt.subplots(1, 2, figsize=(13, 5.5))
+sc0 = axes[0].scatter(X_pca_sin[:, 0], X_pca_sin[:, 1], c=target_ca, cmap="coolwarm", s=30, alpha=0.8)
+axes[0].set_title("PCA SIN escalamiento")
+axes[0].set_xlabel(f"PC1 ({pca_sin.explained_variance_ratio_[0]*100:.1f}%)")
+axes[0].set_ylabel(f"PC2 ({pca_sin.explained_variance_ratio_[1]*100:.1f}%)")
+
+sc1 = axes[1].scatter(X_pca_con[:, 0], X_pca_con[:, 1], c=target_ca, cmap="coolwarm", s=30, alpha=0.8)
+axes[1].set_title("PCA CON escalamiento")
+axes[1].set_xlabel(f"PC1 ({pca_con.explained_variance_ratio_[0]*100:.1f}%)")
+axes[1].set_ylabel(f"PC2 ({pca_con.explained_variance_ratio_[1]*100:.1f}%)")
+plt.tight_layout()
+plt.show()
+```
+
+> **Interpretación:** sin escalar, PC1 está dominado casi por completo por `vivienda` y no separa visualmente las clases. Al escalar, la varianza se reparte más equilibradamente y PC1 empieza a separar razonablemente los casos de compra vs. alquiler, confirmando que **el escalamiento es indispensable** antes de aplicar PCA en este dataset.
+
+```{python}
+pca_full = PCA(random_state=RANDOM_STATE)
+pca_full.fit(X_ca_scaled)
+var_exp = pca_full.explained_variance_ratio_
+var_acum = np.cumsum(var_exp)
+n_componentes = int(np.argmax(var_acum >= 0.95) + 1)
+print(f"Componentes necesarios para >=95% de varianza: {n_componentes} de {X_ca.shape[1]} "
+      f"({var_acum[n_componentes-1]*100:.2f}% acumulado)")
+```
+
+```{python}
+#| fig-cap: "Scree plot — varianza explicada acumulada"
+fig, ax1 = plt.subplots(figsize=(7.5, 4.5))
+ax1.bar(range(1, len(var_exp) + 1), var_exp, color="#2E86AB", alpha=0.7)
+ax1.set_xlabel("Componente principal"); ax1.set_ylabel("Varianza individual")
+ax2 = ax1.twinx()
+ax2.plot(range(1, len(var_exp) + 1), var_acum, color="#A23B72", marker="o")
+ax2.axhline(0.95, color="gray", linestyle="--", linewidth=1)
+ax2.set_ylabel("Varianza acumulada")
+plt.tight_layout()
+plt.show()
+```
+
+> **Justificación del número de componentes:** se conserva el menor número de componentes que retenga ≥95% de varianza acumulada. La varianza se reparte de forma relativamente uniforme (sin un salto abrupto), lo que indica que las 9 variables originales no están fuertemente correlacionadas entre sí — un resultado honesto: PCA solo logra eliminar 2 dimensiones sin pérdida sustancial de información, en vez de una reducción drástica.
+
+# DE-1 · Clasificación alterna: diagnóstico de cáncer de mama — Logistic Regression
+
+## Justificación del algoritmo
+
+Alterno al Decision Tree de SA-2. Se usa **Logistic Regression**, modelo lineal visto en clase, porque sus coeficientes son interpretables en términos de efecto sobre la probabilidad de malignidad, y contrasta directamente con el enfoque no lineal del árbol.
+
+## Diseño del modelo — paso a paso
+
+1. Mismo preprocesamiento que SA-2 (mismo split, para comparabilidad).
+2. Pipeline de escalado + Logistic Regression.
+3. Búsqueda de hiperparámetros (`C`, `penalty`, `solver`).
+4. Evaluación y comparación directa contra SA-2.
+
+```{python}
+from sklearn.preprocessing import StandardScaler as SS2
+from sklearn.linear_model import LogisticRegression
+from sklearn.pipeline import Pipeline
+
+pipe_lr = Pipeline([("scaler", SS2()), ("clf", LogisticRegression(max_iter=5000, random_state=RANDOM_STATE))])
+param_grid_lr = {"clf__C": [0.001, 0.01, 0.1, 1, 10, 100], "clf__penalty": ["l1", "l2"], "clf__solver": ["liblinear"]}
+
+grid_lr = GridSearchCV(pipe_lr, param_grid=param_grid_lr, cv=cv_dt, scoring="f1", n_jobs=-1)
+grid_lr.fit(Xdt_train, ydt_train)
+print("Mejores hiperparámetros:", grid_lr.best_params_)
+```
+
+## Evaluación y optimización
+
+```{python}
+best_lr = grid_lr.best_estimator_
+pred_lr = best_lr.predict(Xdt_test)
+proba_lr = best_lr.predict_proba(Xdt_test)[:, 1]
+
+metrics_lr = {
+    "Accuracy": accuracy_score(ydt_test, pred_lr),
+    "Precision": precision_score(ydt_test, pred_lr),
+    "Recall": recall_score(ydt_test, pred_lr),
+    "F1": f1_score(ydt_test, pred_lr),
+    "ROC-AUC": roc_auc_score(ydt_test, proba_lr),
+}
+comparacion_clf = pd.DataFrame({"Decision Tree (SA-2)": metrics_dt, "Logistic Regression (DE-1)": metrics_lr})
+comparacion_clf.round(4)
+```
+
+> **Interpretación:** esta tabla compara ambos algoritmos sobre el mismo split de datos. Un recall más alto en Logistic Regression indicaría que la frontera lineal captura mejor la señal relevante que las particiones del árbol, minimizando falsos negativos — el error más costoso en diagnóstico médico.
+
+## Gráficas personalizadas e interpretación
+
+```{python}
+#| fig-cap: "Curvas ROC comparadas — Decision Tree vs. Logistic Regression"
+fpr_dt, tpr_dt, _ = roc_curve(ydt_test, proba_dt)
+fpr_lr, tpr_lr, _ = roc_curve(ydt_test, proba_lr)
+fig, ax = plt.subplots(figsize=(5.5, 5.5))
+ax.plot(fpr_dt, tpr_dt, color="#2E86AB", linewidth=2, label=f"Decision Tree (AUC={metrics_dt['ROC-AUC']:.3f})")
+ax.plot(fpr_lr, tpr_lr, color="#6A4C93", linewidth=2, label=f"Logistic Regression (AUC={metrics_lr['ROC-AUC']:.3f})")
+ax.plot([0, 1], [0, 1], "k--", linewidth=1, label="Aleatorio")
+ax.set_xlabel("Tasa de falsos positivos"); ax.set_ylabel("Tasa de verdaderos positivos")
+ax.legend()
+plt.tight_layout()
+plt.show()
+```
+
+> **Interpretación:** la curva con mayor área bajo la curva (AUC) discrimina mejor entre clases. Esta comparación visual complementa la tabla de métricas para decidir cuál algoritmo preferir en este problema.
+
+# DE-2 · Regresión alterna: predicción de carreras — Ridge Regression
+
+## Justificación del algoritmo
+
+Alterno al Random Forest de SA-1. Se usa **Ridge Regression**, modelo lineal regularizado visto en clase, más estable que una regresión lineal simple ante un dataset pequeño (30 observaciones).
+
+## Diseño del modelo — paso a paso
+
+1. Mismo dataset y split que SA-1.
+2. Modelo baseline (Ridge por defecto).
+3. Búsqueda de hiperparámetros sobre `alpha`.
+4. Evaluación y comparación directa contra SA-1.
+
+```{python}
+from sklearn.linear_model import Ridge
+
+baseline_ridge = Ridge(random_state=RANDOM_STATE)
+baseline_ridge.fit(Xrf_train, yrf_train)
+pred_baseline_ridge = baseline_ridge.predict(Xrf_test)
+
+param_grid_ridge = {"alpha": [0.001, 0.01, 0.1, 1, 5, 10, 50, 100, 500, 1000]}
+grid_ridge = GridSearchCV(Ridge(random_state=RANDOM_STATE), param_grid=param_grid_ridge, cv=5, scoring="r2", n_jobs=-1)
+grid_ridge.fit(Xrf_train, yrf_train)
+print("Mejor alpha:", grid_ridge.best_params_["alpha"])
+print("Mejor R2 (CV):", round(grid_ridge.best_score_, 4))
+```
+
+## Evaluación y optimización
+
+```{python}
+best_ridge = grid_ridge.best_estimator_
+pred_best_ridge = best_ridge.predict(Xrf_test)
+
+comparacion_reg = pd.DataFrame({
+    "Métrica": ["R2 test", "MAE test", "RMSE test", "R2 CV"],
+    "Random Forest (SA-1)": [
+        r2_score(yrf_test, pred_best_rf),
+        mean_absolute_error(yrf_test, pred_best_rf),
+        mean_squared_error(yrf_test, pred_best_rf) ** 0.5,
+        grid_rf.best_score_,
+    ],
+    "Ridge (DE-2)": [
+        r2_score(yrf_test, pred_best_ridge),
+        mean_absolute_error(yrf_test, pred_best_ridge),
+        mean_squared_error(yrf_test, pred_best_ridge) ** 0.5,
+        grid_ridge.best_score_,
+    ],
+})
+comparacion_reg
+```
+
+> **Interpretación:** con un dataset de solo 30 observaciones, el R² de CV es más confiable que el R² de un test set de 6 equipos. Si Ridge supera a Random Forest en R² de CV, es evidencia de que la relación `bateos → runs` es predominantemente lineal.
+
+## Gráficas personalizadas e interpretación
+
+```{python}
+#| fig-cap: "Valores reales vs. predichos — Random Forest vs. Ridge"
+fig, ax = plt.subplots(figsize=(6, 6))
+ax.scatter(yrf_test, pred_best_rf, color="#2E86AB", label="Random Forest (SA-1)", s=70, alpha=0.8)
+ax.scatter(yrf_test, pred_best_ridge, color="#6A4C93", label="Ridge (DE-2)", s=70, alpha=0.8)
+lims = [min(yrf_test.min(), pred_best_rf.min(), pred_best_ridge.min()) - 20,
+        max(yrf_test.max(), pred_best_rf.max(), pred_best_ridge.max()) + 20]
+ax.plot(lims, lims, "k--", linewidth=1, label="Predicción perfecta")
+ax.set_xlabel("Runs reales"); ax.set_ylabel("Runs predichos")
+ax.legend()
+plt.tight_layout()
+plt.show()
+```
+
+> **Interpretación:** esta gráfica compara visualmente ambos modelos optimizados sobre el mismo conjunto de prueba — el modelo cuyos puntos se acercan más a la diagonal predice mejor en este split particular.
 
 # Conclusión general
 
-Este documento reproduce, con **Quarto** como herramienta alternativa a Jupyter Notebook, los dos análisis de la sección DE de la evaluación: clasificación con Logistic Regression sobre `breast-cancer.csv` y regresión con Ridge sobre `beisbol.csv`. Todo el código mostrado se ejecutó al momento de generar este documento (no son capturas de pantalla ni resultados pegados manualmente), demostrando que un flujo de trabajo de ciencia de datos reproducible puede documentarse fuera del entorno de notebooks interactivos, con el mismo rigor de justificación, diseño, evaluación, optimización de hiperparámetros e interpretación de resultados.
+Este documento rehace, con **Quarto** como herramienta alternativa a Jupyter Notebook, los seis análisis de las secciones SA y DE de la evaluación: regresión (Random Forest y Ridge), clasificación (Decision Tree y Logistic Regression), agrupación (K-Means) y reducción de dimensionalidad (PCA). Todo el código mostrado se ejecutó al momento de generar este documento — no son capturas de pantalla ni resultados pegados manualmente — demostrando que un flujo de trabajo de ciencia de datos reproducible puede documentarse fuera del entorno de notebooks interactivos, con el mismo rigor de justificación, diseño, evaluación, optimización de hiperparámetros e interpretación de resultados que en SA y DE.
 
-Los modelos entrenados en las secciones SA y DE, junto con este documento, están disponibles en el repositorio del proyecto (ver `README.md`).
+Los modelos entrenados y las gráficas están disponibles en el repositorio del proyecto (ver `README.md`).
